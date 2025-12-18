@@ -294,20 +294,7 @@ This document contains the complete context of the Python project located at `{p
             with open(file_info.path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
             
-            # Check if we need to compress
-            should_compress = (
-                self.config.compress_large_files and
-                file_info.lines > self.config.compress_threshold_lines
-            )
-            
-            if should_compress:
-                content = self._compress_file_content(content, file_info)
-            elif self.config.max_lines_per_file and file_info.lines > self.config.max_lines_per_file:
-                # Truncate to max lines
-                content_lines = content.split('\n')
-                content = '\n'.join(content_lines[:self.config.max_lines_per_file])
-                content += f"\n\n... (truncated, showing first {self.config.max_lines_per_file} of {file_info.lines} lines) ..."
-            
+            # Always include full file content - no compression or truncation
             # Remove comments if requested
             if not self.config.include_comments and file_info.language == 'python':
                 content = self._remove_python_comments(content)
