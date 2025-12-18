@@ -4,7 +4,7 @@ Configuration management module.
 
 import json
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, asdict
 from .generator import GenerationConfig
 
@@ -13,8 +13,8 @@ from .generator import GenerationConfig
 class AppConfig:
     """Application configuration."""
     generation_config: GenerationConfig
-    custom_ignore_patterns: list[str]
-    custom_important_files: list[str]
+    custom_ignore_patterns: List[str]
+    custom_important_files: List[str]
     
     @classmethod
     def default(cls) -> 'AppConfig':
