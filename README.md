@@ -5,6 +5,8 @@ Context Manager for LLMs
 > 
 > **⚠️ WARNING: PROJECT IS IN EARLY DEVELOPMENT STAGE AND MAY BE ROUGH. USE AT YOUR OWN RISK. ⚠️**
 
+![CMforAI](cmforai.png)
+
 A powerful tool to extract and format project context for LLM consumption. Designed to help you quickly share your codebase context with ChatGPT, Qwen, Claude, and other LLMs.
 
 ## Features
