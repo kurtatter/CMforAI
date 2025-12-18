@@ -119,30 +119,61 @@ This document contains the complete context of the Python project located at `{p
         """Build a tree representation of the project structure."""
         lines = [root_name + "/"]
         
-        # Sort directories
-        sorted_dirs = sorted([d for d in structure.keys() if d != '/'])
+        # Organize structure by directory depth
+        dirs_by_depth = {}
+        for directory in structure.keys():
+            if directory == '/':
+                depth = 0
+            else:
+                depth = len(Path(directory).parts)
+            if depth not in dirs_by_depth:
+                dirs_by_depth[depth] = []
+            dirs_by_depth[depth].append(directory)
         
-        for i, directory in enumerate(sorted_dirs):
-            is_last = i == len(sorted_dirs) - 1
-            prefix = "└── " if is_last else "├── "
-            lines.append(prefix + Path(directory).name + "/")
+        # Sort directories at each depth
+        for depth in sorted(dirs_by_depth.keys()):
+            dirs_by_depth[depth].sort()
+        
+        # Build tree recursively
+        def add_directory(dir_path: str, prefix: str, is_last: bool):
+            """Add directory and its contents to tree."""
+            if dir_path == '/':
+                dir_name = root_name
+                files = structure.get('/', [])
+            else:
+                dir_name = Path(dir_path).name
+                files = [f for f in structure.get(dir_path, []) 
+                        if str(Path(f).parent) == dir_path or (dir_path == '/' and str(Path(f).parent) == '.')]
+            
+            # Add directory line (skip root)
+            if dir_path != '/':
+                lines.append(prefix + ("└── " if is_last else "├── ") + dir_name + "/")
+                new_prefix = prefix + ("    " if is_last else "│   ")
+            else:
+                new_prefix = ""
             
             # Add files in this directory
-            files = [f for f in structure[directory] if Path(f).parent.name == Path(directory).name or directory == '/']
-            sub_prefix = "    " if is_last else "│   "
+            sorted_files = sorted(set(files))
+            for j, file_path in enumerate(sorted_files):
+                file_is_last = j == len(sorted_files) - 1
+                file_name = Path(file_path).name
+                file_prefix = new_prefix + ("└── " if file_is_last else "├── ")
+                lines.append(file_prefix + file_name)
             
-            for j, file_path in enumerate(sorted(files)):
-                file_is_last = j == len(files) - 1
-                file_prefix = sub_prefix + ("└── " if file_is_last else "├── ")
-                lines.append(file_prefix + Path(file_path).name)
+            # Add subdirectories
+            if dir_path == '/':
+                subdirs = [d for d in structure.keys() if d != '/' and len(Path(d).parts) == 1]
+            else:
+                subdirs = [d for d in structure.keys() 
+                          if d != '/' and str(Path(d).parent) == dir_path]
+            
+            subdirs.sort()
+            for k, subdir in enumerate(subdirs):
+                subdir_is_last = k == len(subdirs) - 1
+                add_directory(subdir, new_prefix, subdir_is_last)
         
-        # Add root level files
-        root_files = structure.get('/', [])
-        if root_files:
-            for j, file_path in enumerate(sorted(root_files)):
-                file_is_last = j == len(root_files) - 1 and not sorted_dirs
-                file_prefix = "└── " if file_is_last else "├── "
-                lines.append(file_prefix + Path(file_path).name)
+        # Start with root
+        add_directory('/', '', True)
         
         return "\n".join(lines)
     
