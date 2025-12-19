@@ -11,7 +11,7 @@ A powerful tool to extract and format project context for LLM consumption. Desig
 
 ## Features
 
-- 🔍 **Smart Project Analysis**: Automatically analyzes Python projects and identifies important files
+- 🔍 **Smart Project Analysis**: Automatically analyzes projects (Python, JavaScript/TypeScript, Java, Go, Rust, and more) and identifies important files
 - 📝 **Markdown Output**: Generates well-formatted markdown context ready for LLM consumption
 - 🎯 **Intelligent Filtering**: Excludes unnecessary files (`.git`, `__pycache__`, `venv`, etc.)
 - 📊 **Large Project Support**: Handles very large projects with compression and token limits

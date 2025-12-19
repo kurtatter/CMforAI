@@ -6,6 +6,7 @@ import re
 from typing import List, Optional, Dict
 from pathlib import Path
 from dataclasses import dataclass
+import re
 from .analyzer import ProjectInfo, FileInfo
 
 
@@ -73,9 +74,10 @@ class MarkdownGenerator:
     
     def _generate_header(self, project_info: ProjectInfo) -> str:
         """Generate header with instructions for LLM."""
+        project_type_label = project_info.project_type.capitalize() if project_info.project_type != 'unknown' else 'Project'
         return f"""# Project Context: {project_info.root.name}
 
-This document contains the complete context of the Python project located at `{project_info.root}`.
+This document contains the complete context of the {project_type_label} project located at `{project_info.root}`.
 
 **Instructions for LLM:**
 - This is a complete codebase context for analysis, modification, or understanding
@@ -83,6 +85,7 @@ This document contains the complete context of the Python project located at `{p
 - Important files are marked and prioritized
 - Use this context to understand the project architecture, dependencies, and implementation details
 - When referencing files, use the relative paths provided
+- Project type: {project_info.project_type}
 
 ---
 """
@@ -104,6 +107,9 @@ This document contains the complete context of the Python project located at `{p
         total_size = sum(f.size for f in project_info.files)
         size_mb = total_size / (1024 * 1024)
         metadata.append(f"- **Total Size:** {size_mb:.2f} MB")
+        
+        if project_info.project_type and project_info.project_type != 'unknown':
+            metadata.append(f"- **Project Type:** {project_info.project_type}")
         
         # Count by language
         lang_counts = {}
@@ -599,8 +605,8 @@ This document contains the complete context of the Python project located at `{p
             
             # Always include full file content - no compression or truncation
             # Remove comments if requested
-            if not self.config.include_comments and file_info.language == 'python':
-                content = self._remove_python_comments(content)
+            if not self.config.include_comments:
+                content = self._remove_comments(content, file_info.language)
             
             # Add code block
             lang_tag = file_info.language if file_info.language != 'unknown' else ''
@@ -615,15 +621,27 @@ This document contains the complete context of the Python project located at `{p
     
     def _compress_file_content(self, content: str, file_info: FileInfo) -> str:
         """Compress large file content by showing structure and key parts."""
-        if file_info.language != 'python':
-            # For non-Python files, just truncate
-            lines = content.split('\n')
+        lines = content.split('\n')
+        
+        # Language-specific compression
+        if file_info.language == 'python':
+            return self._compress_python_file(lines)
+        elif file_info.language in ['javascript', 'typescript']:
+            return self._compress_js_file(lines, file_info.language)
+        elif file_info.language == 'java':
+            return self._compress_java_file(lines)
+        elif file_info.language == 'go':
+            return self._compress_go_file(lines)
+        elif file_info.language == 'rust':
+            return self._compress_rust_file(lines)
+        else:
+            # Generic compression for other languages
             if len(lines) > 100:
                 return '\n'.join(lines[:50]) + f"\n\n... (truncated, showing first 50 of {len(lines)} lines) ...\n\n" + '\n'.join(lines[-50:])
             return content
-        
-        # For Python files, extract structure
-        lines = content.split('\n')
+    
+    def _compress_python_file(self, lines: List[str]) -> str:
+        """Compress Python file by extracting structure."""
         compressed = []
         compressed.append("# File structure and key components:\n")
         
@@ -631,7 +649,7 @@ This document contains the complete context of the Python project located at `{p
         imports = [line for line in lines if line.strip().startswith(('import ', 'from '))]
         if imports:
             compressed.append("## Imports:")
-            compressed.extend(imports[:20])  # Limit imports
+            compressed.extend(imports[:20])
             if len(imports) > 20:
                 compressed.append(f"# ... and {len(imports) - 20} more imports")
             compressed.append("")
@@ -641,19 +659,16 @@ This document contains the complete context of the Python project located at `{p
         indent_level = 0
         for i, line in enumerate(lines):
             stripped = line.strip()
-            # Detect class/function definitions
             if stripped.startswith(('class ', 'def ', 'async def ')):
-                # Calculate indent
                 indent = len(line) - len(line.lstrip())
-                if indent <= indent_level + 4:  # New top-level or slightly nested
+                if indent <= indent_level + 4:
                     definitions.append((i, line, indent))
                     indent_level = indent
         
         if definitions:
             compressed.append("## Key Definitions:")
-            for idx, (line_num, def_line, indent) in enumerate(definitions[:30]):  # Limit definitions
+            for idx, (line_num, def_line, indent) in enumerate(definitions[:30]):
                 compressed.append(def_line)
-                # Include a few lines after definition (docstring, etc.)
                 for j in range(line_num + 1, min(line_num + 5, len(lines))):
                     if lines[j].strip():
                         compressed.append(lines[j])
@@ -664,14 +679,216 @@ This document contains the complete context of the Python project located at `{p
             if len(definitions) > 30:
                 compressed.append(f"# ... and {len(definitions) - 30} more definitions")
         
-        compressed.append("\n# Full file content (truncated for large files):")
-        compressed.append("# Showing first and last portions...")
-        compressed.append("")
+        compressed.append("\n# Full file content (truncated):")
         compressed.append("".join(lines[:50]))
         compressed.append("\n... (middle section omitted) ...\n")
         compressed.append("".join(lines[-50:]))
         
         return '\n'.join(compressed)
+    
+    def _compress_js_file(self, lines: List[str], lang: str) -> str:
+        """Compress JavaScript/TypeScript file by extracting structure."""
+        compressed = []
+        compressed.append(f"# File structure and key components ({lang}):\n")
+        
+        # Extract imports
+        imports = []
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith(('import ', 'export ', 'require(')) or 'from ' in stripped:
+                imports.append(line)
+        
+        if imports:
+            compressed.append("## Imports/Exports:")
+            compressed.extend(imports[:20])
+            if len(imports) > 20:
+                compressed.append(f"// ... and {len(imports) - 20} more imports")
+            compressed.append("")
+        
+        # Extract function/class definitions
+        definitions = []
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            # Match: function, class, const/let/var with function, export function/class
+            if re.match(r'^\s*(export\s+)?(async\s+)?(function|class|const|let|var)\s+\w+', stripped):
+                definitions.append((i, line))
+        
+        if definitions:
+            compressed.append("## Key Definitions:")
+            for line_num, def_line in definitions[:30]:
+                compressed.append(def_line)
+                # Include a few lines after
+                for j in range(line_num + 1, min(line_num + 5, len(lines))):
+                    if lines[j].strip():
+                        compressed.append(lines[j])
+                        if not lines[j].strip().startswith(('//', '/*', '*')):
+                            break
+                compressed.append("")
+            
+            if len(definitions) > 30:
+                compressed.append(f"// ... and {len(definitions) - 30} more definitions")
+        
+        compressed.append("\n// Full file content (truncated):")
+        compressed.append("".join(lines[:50]))
+        compressed.append("\n// ... (middle section omitted) ...\n")
+        compressed.append("".join(lines[-50:]))
+        
+        return '\n'.join(compressed)
+    
+    def _compress_java_file(self, lines: List[str]) -> str:
+        """Compress Java file by extracting structure."""
+        compressed = []
+        compressed.append("# File structure and key components (Java):\n")
+        
+        # Extract imports
+        imports = [line for line in lines if line.strip().startswith('import ')]
+        if imports:
+            compressed.append("## Imports:")
+            compressed.extend(imports[:20])
+            if len(imports) > 20:
+                compressed.append(f"// ... and {len(imports) - 20} more imports")
+            compressed.append("")
+        
+        # Extract class/method definitions
+        definitions = []
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if re.match(r'^\s*(public|private|protected)?\s*(static)?\s*(class|interface|enum|@?\w+\s+(class|interface))', stripped):
+                definitions.append((i, line))
+            elif re.match(r'^\s*(public|private|protected)?\s*(static)?\s*\w+\s+\w+\s*\(', stripped):
+                definitions.append((i, line))
+        
+        if definitions:
+            compressed.append("## Key Definitions:")
+            for line_num, def_line in definitions[:30]:
+                compressed.append(def_line)
+                for j in range(line_num + 1, min(line_num + 5, len(lines))):
+                    if lines[j].strip():
+                        compressed.append(lines[j])
+                        if not lines[j].strip().startswith(('//', '/*', '*')):
+                            break
+                compressed.append("")
+            
+            if len(definitions) > 30:
+                compressed.append(f"// ... and {len(definitions) - 30} more definitions")
+        
+        compressed.append("\n// Full file content (truncated):")
+        compressed.append("".join(lines[:50]))
+        compressed.append("\n// ... (middle section omitted) ...\n")
+        compressed.append("".join(lines[-50:]))
+        
+        return '\n'.join(compressed)
+    
+    def _compress_go_file(self, lines: List[str]) -> str:
+        """Compress Go file by extracting structure."""
+        compressed = []
+        compressed.append("// File structure and key components (Go):\n")
+        
+        # Extract imports
+        imports = []
+        in_import_block = False
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith('import '):
+                imports.append(line)
+                in_import_block = True
+            elif in_import_block:
+                imports.append(line)
+                if stripped == ')' or (stripped and not stripped.startswith('"')):
+                    in_import_block = False
+        
+        if imports:
+            compressed.append("## Imports:")
+            compressed.extend(imports[:20])
+            if len(imports) > 20:
+                compressed.append(f"// ... and {len(imports) - 20} more imports")
+            compressed.append("")
+        
+        # Extract function/type definitions
+        definitions = []
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if re.match(r'^\s*(func|type|const|var)\s+\w+', stripped):
+                definitions.append((i, line))
+        
+        if definitions:
+            compressed.append("## Key Definitions:")
+            for line_num, def_line in definitions[:30]:
+                compressed.append(def_line)
+                for j in range(line_num + 1, min(line_num + 5, len(lines))):
+                    if lines[j].strip():
+                        compressed.append(lines[j])
+                        if not lines[j].strip().startswith('//'):
+                            break
+                compressed.append("")
+            
+            if len(definitions) > 30:
+                compressed.append(f"// ... and {len(definitions) - 30} more definitions")
+        
+        compressed.append("\n// Full file content (truncated):")
+        compressed.append("".join(lines[:50]))
+        compressed.append("\n// ... (middle section omitted) ...\n")
+        compressed.append("".join(lines[-50:]))
+        
+        return '\n'.join(compressed)
+    
+    def _compress_rust_file(self, lines: List[str]) -> str:
+        """Compress Rust file by extracting structure."""
+        compressed = []
+        compressed.append("// File structure and key components (Rust):\n")
+        
+        # Extract imports
+        imports = [line for line in lines if line.strip().startswith(('use ', 'mod '))]
+        if imports:
+            compressed.append("## Imports/Modules:")
+            compressed.extend(imports[:20])
+            if len(imports) > 20:
+                compressed.append(f"// ... and {len(imports) - 20} more imports")
+            compressed.append("")
+        
+        # Extract function/struct/enum definitions
+        definitions = []
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if re.match(r'^\s*(pub\s+)?(fn|struct|enum|trait|impl|mod|const|static)\s+\w+', stripped):
+                definitions.append((i, line))
+        
+        if definitions:
+            compressed.append("## Key Definitions:")
+            for line_num, def_line in definitions[:30]:
+                compressed.append(def_line)
+                for j in range(line_num + 1, min(line_num + 5, len(lines))):
+                    if lines[j].strip():
+                        compressed.append(lines[j])
+                        if not lines[j].strip().startswith('//'):
+                            break
+                compressed.append("")
+            
+            if len(definitions) > 30:
+                compressed.append(f"// ... and {len(definitions) - 30} more definitions")
+        
+        compressed.append("\n// Full file content (truncated):")
+        compressed.append("".join(lines[:50]))
+        compressed.append("\n// ... (middle section omitted) ...\n")
+        compressed.append("".join(lines[-50:]))
+        
+        return '\n'.join(compressed)
+    
+    def _remove_comments(self, content: str, language: str) -> str:
+        """Remove comments from code based on language."""
+        if language == 'python':
+            return self._remove_python_comments(content)
+        elif language in ['javascript', 'typescript']:
+            return self._remove_js_comments(content)
+        elif language in ['java', 'c', 'cpp', 'csharp', 'go', 'rust']:
+            return self._remove_cstyle_comments(content)
+        elif language == 'ruby':
+            return self._remove_ruby_comments(content)
+        elif language == 'shell':
+            return self._remove_shell_comments(content)
+        else:
+            # Generic: try to remove # and // comments
+            return self._remove_generic_comments(content)
     
     def _remove_python_comments(self, content: str) -> str:
         """Remove Python comments from code."""
@@ -683,7 +900,6 @@ This document contains the complete context of the Python project located at `{p
         for line in lines:
             # Handle multiline strings/comments
             if '"""' in line or "'''" in line:
-                # Simple toggle (not perfect but works for most cases)
                 if not in_multiline:
                     multiline_char = '"""' if '"""' in line else "'''"
                     in_multiline = True
@@ -699,7 +915,6 @@ This document contains the complete context of the Python project located at `{p
             
             # Remove inline comments
             if '#' in line:
-                # Check if # is in a string
                 in_string = False
                 quote_char = None
                 for i, char in enumerate(line):
@@ -716,6 +931,170 @@ This document contains the complete context of the Python project located at `{p
                 cleaned.append(line)
             else:
                 cleaned.append(line)
+        
+        return '\n'.join(cleaned)
+    
+    def _remove_js_comments(self, content: str) -> str:
+        """Remove JavaScript/TypeScript comments."""
+        lines = content.split('\n')
+        cleaned = []
+        in_multiline = False
+        
+        for line in lines:
+            if '/*' in line:
+                in_multiline = True
+                # Check if it closes on same line
+                if '*/' in line:
+                    # Remove the comment part
+                    parts = line.split('/*', 1)
+                    if len(parts) > 1:
+                        comment_part = parts[1].split('*/', 1)
+                        if len(comment_part) > 1:
+                            line = parts[0] + comment_part[1]
+                            in_multiline = False
+                        else:
+                            line = parts[0]
+                    else:
+                        line = ''
+                else:
+                    line = line.split('/*', 1)[0]
+            
+            if in_multiline:
+                if '*/' in line:
+                    line = line.split('*/', 1)[1]
+                    in_multiline = False
+                else:
+                    line = ''
+            
+            # Remove single-line comments
+            if '//' in line:
+                # Check if // is in a string
+                in_string = False
+                quote_char = None
+                for i, char in enumerate(line):
+                    if char in ('"', "'", '`') and (i == 0 or line[i-1] != '\\'):
+                        if not in_string:
+                            in_string = True
+                            quote_char = char
+                        elif char == quote_char:
+                            in_string = False
+                            quote_char = None
+                    elif i < len(line) - 1 and line[i:i+2] == '//' and not in_string:
+                        line = line[:i]
+                        break
+            
+            if line or not in_multiline:
+                cleaned.append(line)
+        
+        return '\n'.join(cleaned)
+    
+    def _remove_cstyle_comments(self, content: str) -> str:
+        """Remove C-style comments (// and /* */)."""
+        lines = content.split('\n')
+        cleaned = []
+        in_multiline = False
+        
+        for line in lines:
+            if '/*' in line:
+                in_multiline = True
+                if '*/' in line:
+                    parts = line.split('/*', 1)
+                    if len(parts) > 1:
+                        comment_part = parts[1].split('*/', 1)
+                        if len(comment_part) > 1:
+                            line = parts[0] + comment_part[1]
+                            in_multiline = False
+                        else:
+                            line = parts[0]
+                    else:
+                        line = ''
+                else:
+                    line = line.split('/*', 1)[0]
+            
+            if in_multiline:
+                if '*/' in line:
+                    line = line.split('*/', 1)[1]
+                    in_multiline = False
+                else:
+                    line = ''
+            
+            # Remove single-line comments
+            if '//' in line:
+                line = line.split('//', 1)[0].rstrip()
+            
+            if line or not in_multiline:
+                cleaned.append(line)
+        
+        return '\n'.join(cleaned)
+    
+    def _remove_ruby_comments(self, content: str) -> str:
+        """Remove Ruby comments."""
+        lines = content.split('\n')
+        cleaned = []
+        
+        for line in lines:
+            # Remove inline comments (but not in strings)
+            if '#' in line:
+                in_string = False
+                quote_char = None
+                for i, char in enumerate(line):
+                    if char in ('"', "'") and (i == 0 or line[i-1] != '\\'):
+                        if not in_string:
+                            in_string = True
+                            quote_char = char
+                        elif char == quote_char:
+                            in_string = False
+                            quote_char = None
+                    elif char == '#' and not in_string:
+                        line = line[:i]
+                        break
+            cleaned.append(line)
+        
+        return '\n'.join(cleaned)
+    
+    def _remove_shell_comments(self, content: str) -> str:
+        """Remove shell script comments."""
+        lines = content.split('\n')
+        cleaned = []
+        
+        for line in lines:
+            stripped = line.lstrip()
+            # Remove comments, but preserve shebang
+            if stripped.startswith('#'):
+                if not stripped.startswith('#!'):
+                    line = ''
+            elif '#' in line:
+                # Remove inline comments (but not in strings)
+                in_string = False
+                quote_char = None
+                for i, char in enumerate(line):
+                    if char in ('"', "'") and (i == 0 or line[i-1] != '\\'):
+                        if not in_string:
+                            in_string = True
+                            quote_char = char
+                        elif char == quote_char:
+                            in_string = False
+                            quote_char = None
+                    elif char == '#' and not in_string:
+                        line = line[:i]
+                        break
+            cleaned.append(line)
+        
+        return '\n'.join(cleaned)
+    
+    def _remove_generic_comments(self, content: str) -> str:
+        """Generic comment removal for unknown languages."""
+        lines = content.split('\n')
+        cleaned = []
+        
+        for line in lines:
+            # Try to remove # comments
+            if '#' in line:
+                line = line.split('#', 1)[0].rstrip()
+            # Try to remove // comments
+            if '//' in line:
+                line = line.split('//', 1)[0].rstrip()
+            cleaned.append(line)
         
         return '\n'.join(cleaned)
 
