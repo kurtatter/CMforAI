@@ -2,6 +2,7 @@
 Markdown generator module for creating formatted context from project analysis.
 """
 
+import re
 from typing import List, Optional, Dict
 from pathlib import Path
 from dataclasses import dataclass
@@ -43,19 +44,28 @@ class MarkdownGenerator:
         if self.config.add_instructions:
             parts.append(self._generate_header(project_info))
         
+        # Architecture overview (new - Level 1)
+        parts.append(self._generate_architecture_overview(project_info))
+        
+        # Project roadmap (new - key components map)
+        parts.append(self._generate_project_roadmap(project_info))
+        
         # Metadata section
         if self.config.include_metadata:
             parts.append(self._generate_metadata(project_info))
-        
-        # Project structure
-        if self.config.include_structure:
-            parts.append(self._generate_structure(project_info))
         
         # Dependencies
         if self.config.include_dependencies and project_info.dependencies:
             parts.append(self._generate_dependencies(project_info))
         
-        # File contents
+        # Project structure
+        if self.config.include_structure:
+            parts.append(self._generate_structure(project_info))
+        
+        # Thematic grouping of components (new - Level 2)
+        parts.append(self._generate_thematic_components(project_info))
+        
+        # File contents (Level 3 - detailed)
         files_content = self._generate_files_content(project_info)
         parts.append(files_content)
         
@@ -186,6 +196,292 @@ This document contains the complete context of the Python project located at `{p
         lines.append("```")
         return "\n".join(lines)
     
+    def _generate_architecture_overview(self, project_info: ProjectInfo) -> str:
+        """Generate architecture overview (Level 1 - high level)."""
+        lines = ["## 🌐 Architecture Overview\n"]
+        
+        # Detect project type from structure and files
+        project_type = self._detect_project_type(project_info)
+        lines.append(f"- **Project Type:** {project_type}")
+        
+        # Key technologies from dependencies
+        key_tech = self._extract_key_technologies(project_info.dependencies)
+        if key_tech:
+            lines.append(f"- **Key Technologies:** {', '.join(key_tech)}")
+        
+        # Main entry point
+        entry_point = self._find_entry_point(project_info)
+        if entry_point:
+            lines.append(f"- **Entry Point:** `{entry_point.relative_path}`")
+        
+        # Brief description
+        if project_info.description:
+            lines.append(f"\n**Description:** {project_info.description}")
+        else:
+            lines.append(f"\n**Description:** Python project with {len(project_info.files)} files")
+        
+        # Architecture pattern detection
+        arch_pattern = self._detect_architecture_pattern(project_info)
+        if arch_pattern:
+            lines.append(f"- **Architecture Pattern:** {arch_pattern}")
+        
+        return "\n".join(lines)
+    
+    def _generate_project_roadmap(self, project_info: ProjectInfo) -> str:
+        """Generate project roadmap with key components."""
+        lines = ["## 🗺️ Project Roadmap\n"]
+        
+        # Entry point
+        entry_point = self._find_entry_point(project_info)
+        if entry_point:
+            lines.append(f"- **🚪 Entry Point:** `{entry_point.relative_path}`")
+        
+        # Core business logic files (high priority, large files)
+        core_files = [f for f in project_info.files 
+                     if f.is_important and f.language == 'python' 
+                     and f.priority >= 10 and f.lines > 50]
+        core_files.sort(key=lambda x: (x.priority, x.lines), reverse=True)
+        
+        if core_files:
+            lines.append("\n- **💼 Core Business Logic:**")
+            for f in core_files[:5]:  # Top 5
+                importance = self._get_importance_stars(f)
+                lines.append(f"  - {importance} `{f.relative_path}` ({f.lines} lines)")
+        
+        # Critical dependencies
+        critical_deps = self._identify_critical_dependencies(project_info.dependencies)
+        if critical_deps:
+            lines.append("\n- **🔗 Critical Dependencies:**")
+            for dep in critical_deps:
+                lines.append(f"  - {dep}")
+        
+        # Most complex component
+        complex_file = max(project_info.files, key=lambda f: f.lines) if project_info.files else None
+        if complex_file and complex_file.lines > 200:
+            lines.append(f"\n- **⚙️ Most Complex Component:** `{complex_file.relative_path}` ({complex_file.lines} lines)")
+        
+        return "\n".join(lines)
+    
+    def _generate_thematic_components(self, project_info: ProjectInfo) -> str:
+        """Generate thematic grouping of components (Level 2)."""
+        lines = ["## 🧩 Key Components by Functionality\n"]
+        
+        # Group files by functionality/themes
+        themes = self._group_by_themes(project_info.files)
+        
+        theme_icons = {
+            'authentication': '🔐',
+            'api': '🌐',
+            'database': '💾',
+            'websocket': '🔌',
+            'chat': '💬',
+            'config': '⚙️',
+            'utils': '🛠️',
+            'tests': '🧪',
+            'main': '🚀',
+        }
+        
+        for theme, files in themes.items():
+            if not files:
+                continue
+            
+            icon = theme_icons.get(theme, '📁')
+            lines.append(f"\n### {icon} {theme.capitalize()}")
+            
+            # Sort by importance
+            files.sort(key=lambda f: (f.priority, f.lines), reverse=True)
+            
+            for file_info in files[:10]:  # Top 10 per theme
+                importance = self._get_importance_stars(file_info)
+                lines.append(f"- {importance} **`{file_info.relative_path}`**")
+                lines.append(f"  - *{file_info.lines} lines | {file_info.language}*")
+                
+                # Add context if important
+                if file_info.is_important and file_info.lines > 100:
+                    context = self._get_file_context(file_info)
+                    if context:
+                        lines.append(f"  - *Purpose: {context}*")
+        
+        return "\n".join(lines)
+    
+    def _get_importance_stars(self, file_info: FileInfo) -> str:
+        """Get importance stars representation."""
+        if file_info.priority >= 15:
+            return "⭐⭐⭐"
+        elif file_info.priority >= 10:
+            return "⭐⭐"
+        elif file_info.is_important:
+            return "⭐"
+        else:
+            return "⬜"
+    
+    def _detect_project_type(self, project_info: ProjectInfo) -> str:
+        """Detect project type from structure."""
+        file_names = [f.path.name.lower() for f in project_info.files]
+        
+        if any('fastapi' in str(f.path) or 'main.py' in str(f.path) for f in project_info.files):
+            if any('websocket' in str(f.path).lower() for f in project_info.files):
+                return "FastAPI WebSocket Application"
+            return "FastAPI Application"
+        elif any('django' in str(f.path).lower() for f in project_info.files):
+            return "Django Application"
+        elif any('flask' in str(f.path).lower() for f in project_info.files):
+            return "Flask Application"
+        elif 'manage.py' in file_names:
+            return "Django Project"
+        elif any('test' in str(f.path).lower() for f in project_info.files):
+            return "Python Project with Tests"
+        else:
+            return "Python Application"
+    
+    def _extract_key_technologies(self, dependencies: List[str]) -> List[str]:
+        """Extract key technologies from dependencies."""
+        key_tech = []
+        tech_keywords = {
+            'fastapi': 'FastAPI',
+            'django': 'Django',
+            'flask': 'Flask',
+            'sqlalchemy': 'SQLAlchemy',
+            'redis': 'Redis',
+            'postgresql': 'PostgreSQL',
+            'mongodb': 'MongoDB',
+            'celery': 'Celery',
+            'websocket': 'WebSocket',
+            'pydantic': 'Pydantic',
+        }
+        
+        deps_str = ' '.join(dependencies).lower()
+        for keyword, tech_name in tech_keywords.items():
+            if keyword in deps_str:
+                key_tech.append(tech_name)
+        
+        return key_tech[:5]  # Top 5
+    
+    def _find_entry_point(self, project_info: ProjectInfo) -> Optional[FileInfo]:
+        """Find main entry point of the project."""
+        entry_points = ['main.py', 'app.py', 'run.py', '__main__.py']
+        
+        for file_info in project_info.files:
+            if file_info.path.name in entry_points:
+                return file_info
+        
+        # Look for files with 'if __name__ == "__main__"'
+        for file_info in sorted(project_info.files, key=lambda f: f.priority, reverse=True):
+            if file_info.language == 'python' and file_info.lines > 10:
+                try:
+                    with open(file_info.path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
+                        if '__name__' in content and '__main__' in content:
+                            return file_info
+                except Exception:
+                    pass
+        
+        return None
+    
+    def _detect_architecture_pattern(self, project_info: ProjectInfo) -> Optional[str]:
+        """Detect architecture pattern."""
+        dirs = [str(Path(f.relative_path).parent) for f in project_info.files]
+        dirs_str = ' '.join(dirs).lower()
+        
+        if 'mvc' in dirs_str or ('model' in dirs_str and 'view' in dirs_str):
+            return "MVC"
+        elif 'service' in dirs_str or 'services' in dirs_str:
+            return "Service Layer"
+        elif 'repository' in dirs_str:
+            return "Repository Pattern"
+        elif 'handler' in dirs_str or 'handlers' in dirs_str:
+            return "Handler Pattern"
+        
+        return None
+    
+    def _identify_critical_dependencies(self, dependencies: List[str]) -> List[str]:
+        """Identify critical dependencies."""
+        critical = []
+        critical_keywords = ['redis', 'postgresql', 'mysql', 'mongodb', 'sqlite', 
+                           'celery', 'websocket', 'fastapi', 'django', 'flask']
+        
+        for dep in dependencies:
+            dep_lower = dep.lower()
+            for keyword in critical_keywords:
+                if keyword in dep_lower:
+                    critical.append(dep)
+                    break
+        
+        return critical[:5]  # Top 5
+    
+    def _group_by_themes(self, files: List[FileInfo]) -> Dict[str, List[FileInfo]]:
+        """Group files by thematic categories."""
+        themes: Dict[str, List[FileInfo]] = {
+            'authentication': [],
+            'api': [],
+            'database': [],
+            'websocket': [],
+            'chat': [],
+            'config': [],
+            'utils': [],
+            'tests': [],
+            'main': [],
+            'other': [],
+        }
+        
+        for file_info in files:
+            path_lower = file_info.relative_path.lower()
+            name_lower = file_info.path.name.lower()
+            
+            if 'auth' in path_lower or 'login' in path_lower or 'jwt' in path_lower:
+                themes['authentication'].append(file_info)
+            elif 'api' in path_lower or 'router' in path_lower or 'route' in path_lower:
+                themes['api'].append(file_info)
+            elif 'db' in path_lower or 'database' in path_lower or 'model' in path_lower or 'schema' in path_lower:
+                themes['database'].append(file_info)
+            elif 'websocket' in path_lower or 'ws' in path_lower:
+                themes['websocket'].append(file_info)
+            elif 'chat' in path_lower or 'message' in path_lower:
+                themes['chat'].append(file_info)
+            elif 'config' in name_lower or 'setting' in name_lower:
+                themes['config'].append(file_info)
+            elif 'util' in path_lower or 'helper' in path_lower or 'common' in path_lower:
+                themes['utils'].append(file_info)
+            elif 'test' in path_lower:
+                themes['tests'].append(file_info)
+            elif name_lower in ['main.py', 'app.py', 'run.py']:
+                themes['main'].append(file_info)
+            else:
+                themes['other'].append(file_info)
+        
+        # Remove empty themes
+        return {k: v for k, v in themes.items() if v}
+    
+    def _get_file_context(self, file_info: FileInfo) -> str:
+        """Get context/purpose of a file by analyzing its content."""
+        try:
+            with open(file_info.path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read(1000)  # Read first 1000 chars
+            
+            # Look for docstrings or comments
+            if '"""' in content or "'''" in content:
+                # Try to extract docstring
+                docstring_match = re.search(r'"""(.*?)"""', content, re.DOTALL)
+                if docstring_match:
+                    doc = docstring_match.group(1).strip()
+                    if len(doc) < 200:
+                        return doc.split('\n')[0]
+            
+            # Look for class/function names
+            if 'class ' in content:
+                class_match = re.search(r'class\s+(\w+)', content)
+                if class_match:
+                    return f"Class: {class_match.group(1)}"
+            
+            if 'def ' in content:
+                func_match = re.search(r'def\s+(\w+)', content)
+                if func_match:
+                    return f"Function: {func_match.group(1)}"
+        except Exception:
+            pass
+        
+        return ""
+    
     def _generate_files_content(self, project_info: ProjectInfo) -> str:
         """Generate file contents section."""
         lines = ["## File Contents\n"]
@@ -283,10 +579,17 @@ This document contains the complete context of the Python project located at `{p
         """Generate markdown representation of a file."""
         lines = []
         
-        # File header
-        importance_marker = " ⭐" if file_info.is_important else ""
-        lines.append(f"#### File: `{file_info.relative_path}`{importance_marker}")
+        # File header with improved importance system
+        importance_stars = self._get_importance_stars(file_info)
+        lines.append(f"#### {importance_stars} File: `{file_info.relative_path}`")
         lines.append(f"*Language: {file_info.language} | Lines: {file_info.lines} | Size: {file_info.size} bytes*")
+        
+        # Add context for important files
+        if file_info.is_important and file_info.lines > 50:
+            context = self._get_file_context(file_info)
+            if context:
+                lines.append(f"*Purpose: {context}*")
+        
         lines.append("")
         
         # Read and process file content
