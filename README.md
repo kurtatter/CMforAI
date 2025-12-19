@@ -16,7 +16,6 @@ A powerful tool to extract and format project context for LLM consumption. Desig
 - 🎯 **Intelligent Filtering**: Excludes unnecessary files (`.git`, `__pycache__`, `venv`, etc.)
 - 📊 **Large Project Support**: Handles very large projects with compression and token limits
 - ⚙️ **Flexible Configuration**: Highly configurable with command-line options and config files
-- 🖥️ **Dual Interface**: Both CLI and GUI interfaces available
 - 🚀 **Fast & Efficient**: Optimized for large codebases
 
 ## Installation
@@ -61,24 +60,6 @@ Custom ignore patterns:
 ```bash
 cmforai /path/to/your/project --ignore ".*\.log$" --ignore "test_.*"
 ```
-
-### Graphical User Interface
-
-Launch the GUI:
-```bash
-cmforai-gui
-```
-
-Or:
-```bash
-python -m cmforai.gui
-```
-
-The GUI provides:
-- Project browser and analyzer
-- Interactive configuration
-- Real-time preview
-- Save to file or copy to clipboard
 
 ### Configuration Options
 
@@ -171,7 +152,6 @@ cmforai ./project --max-files 50 --no-compress -o important.md
 ## Requirements
 
 - Python 3.8+
-- customtkinter >= 5.2.0
 - pyyaml >= 6.0.1
 
 ## License

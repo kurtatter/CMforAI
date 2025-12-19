@@ -33,7 +33,6 @@ setup(
     entry_points={
         "console_scripts": [
             "cmforai=cmforai.cli:main",
-            "cmforai-gui=cmforai.gui:main",
         ],
     },
     classifiers=[

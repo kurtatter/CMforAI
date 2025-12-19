@@ -24,11 +24,9 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "customtkinter>=5.2.0",
     "pyyaml>=6.0.1",
 ]
 
 [project.scripts]
 cmforai = "cmforai.cli:main"
-cmforai-gui = "cmforai.gui:main"
 
