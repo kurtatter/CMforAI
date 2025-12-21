@@ -135,6 +135,13 @@ Examples:
         default=None,
         help='Path to configuration file (default: use default config)'
     )
+
+    parser.add_argument(
+        '--files',
+        nargs='+',
+        default=None,
+        help='Analyze only specified files (relative paths), but keep project metadata'
+    )
     
     return parser
 
@@ -188,6 +195,8 @@ def main():
         gen_config.include_metadata = False
     if args.no_instructions:
         gen_config.add_instructions = False
+    if args.files:
+        gen_config.files_to_analyze = args.files
     
     # Merge ignore patterns and important files
     ignore_patterns = app_config.custom_ignore_patterns + args.ignore
