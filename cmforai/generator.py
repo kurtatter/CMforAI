@@ -6,7 +6,7 @@ import re
 from typing import List, Optional, Dict
 from pathlib import Path
 from dataclasses import dataclass
-import re
+import sys
 from .analyzer import ProjectInfo, FileInfo
 
 
@@ -25,6 +25,7 @@ class GenerationConfig:
     include_comments: bool = True
     add_instructions: bool = True
     file_separator: str = "\n\n---\n\n"
+    files_to_analyze: Optional[List[str]] = None
 
 
 class MarkdownGenerator:
@@ -519,6 +520,22 @@ This document contains the complete context of the {project_type_label} project 
         """Select which files to include based on configuration."""
         selected = []
         total_tokens = 0
+
+        # Если указаны конкретные файлы для анализа
+        if self.config.files_to_analyze:
+            specified_paths = [Path(f).as_posix() for f in self.config.files_to_analyze]
+            files_to_include = [
+                f for f in files 
+                if f.relative_path in specified_paths or str(f.path.name) in specified_paths
+            ]
+            
+            # Если не найдено файлов - вернуть все (или выдать предупреждение)
+            if not files_to_include:
+                print(f"Warning: No files found matching patterns: {specified_paths}", file=sys.stderr)
+                files_to_include = files
+                
+            # Применить остальные ограничения (размер файла, лимиты токенов)
+            return self._apply_general_limits(files_to_include)
         
         # Separate important and regular files
         important_files = [f for f in files if f.is_important]
@@ -1097,4 +1114,54 @@ This document contains the complete context of the {project_type_label} project 
             cleaned.append(line)
         
         return '\n'.join(cleaned)
-
+    
+    def _apply_general_limits(self, files: List[FileInfo]) -> List[FileInfo]:
+        """Apply general limits (max_files, max_tokens, etc.) to a list of files."""
+        selected = []
+        total_tokens = 0
+        
+        # Separate important and regular files
+        important_files = [f for f in files if f.is_important]
+        regular_files = [f for f in files if not f.is_important]
+        
+        # Process important files first
+        for file_info in important_files:
+            if self.config.max_files and len(selected) >= self.config.max_files:
+                break
+                
+            if self.config.max_file_size and file_info.size > self.config.max_file_size:
+                if not self.config.compress_large_files:
+                    continue
+            
+            file_tokens = self._estimate_file_tokens(file_info)
+            
+            if self.config.max_tokens:
+                if total_tokens + file_tokens > self.config.max_tokens:
+                    if self.config.compress_large_files:
+                        selected.append(file_info)
+                        total_tokens += file_tokens // 3
+                        continue
+                    else:
+                        break
+            
+            selected.append(file_info)
+            total_tokens += file_tokens
+        
+        # Process regular files if space remains
+        for file_info in regular_files:
+            if self.config.max_files and len(selected) >= self.config.max_files:
+                break
+                
+            if self.config.max_file_size and file_info.size > self.config.max_file_size:
+                continue
+                
+            file_tokens = self._estimate_file_tokens(file_info)
+            
+            if self.config.max_tokens:
+                if total_tokens + file_tokens > self.config.max_tokens:
+                    break
+            
+            selected.append(file_info)
+            total_tokens += file_tokens
+        
+        return selected
