@@ -143,6 +143,15 @@ Examples:
         help='Analyze only specified files (relative paths), but keep project metadata'
     )
 
+    parser.add_argument(
+        '--gitlogs', 
+        type=int, 
+        nargs='?', 
+        const=5, 
+        default=None,
+        help='Include git commit history (optionally specify number of commits, default 5)'
+    )
+
     return parser
 
 
@@ -206,6 +215,8 @@ def main():
         gen_config.add_instructions = False
     if args.files:
         gen_config.files_to_analyze = args.files
+    if args.gitlogs:
+        gen_config.gitlogs = args.gitlogs
 
     # Merge ignore patterns and important files
     ignore_patterns = app_config.custom_ignore_patterns + args.ignore
